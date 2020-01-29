@@ -1,0 +1,114 @@
+name: gst
+base: core18
+adopt-info: gst
+summary: GtkStressTesting
+description: |
+  GST is a GTK system utility designed to stress and monitor various hardware components like CPU and RAM.
+license: GPL-3.0
+grade: stable # must be 'stable' to release into candidate/stable channels
+confinement: strict # use 'strict' once you have the right plugs and slots
+
+architectures:
+  - build-on: amd64
+  - build-on: armhf
+  - build-on: i386
+  - build-on: arm64
+
+plugs:
+  config-sensors:
+    interface: system-files
+    read:
+    - /etc/sensors3.conf
+  gnome-3-32-1804:
+    interface: content
+    target: $SNAP/gnome-platform
+    default-provider: gnome-3-32-1804
+  gtk-3-themes:
+    interface: content
+    target: $SNAP/data-dir/themes
+    default-provider: gtk-common-themes
+  icon-themes:
+    interface: content
+    target: $SNAP/data-dir/icons
+    default-provider: gtk-common-themes
+  sound-themes:
+    interface: content
+    target: $SNAP/data-dir/sounds
+    default-provider: gtk-common-themes
+
+parts:
+  desktop-gnome-platform:
+    source: https://github.com/ubuntu/snapcraft-desktop-helpers.git
+    source-depth: 1
+    source-subdir: gtk
+    plugin: make
+    make-parameters: [ "FLAVOR=gtk3" ]
+    build-environment: &buildenv
+      - PATH: /snap/gnome-3-32-1804-sdk/current/usr/bin:$PATH
+      - XDG_DATA_DIRS: /snap/gnome-3-32-1804-sdk/current/usr/share:/usr/share:$XDG_DATA_DIRS
+      - LD_LIBRARY_PATH: /snap/gnome-3-32-1804-sdk/current/lib/$SNAPCRAFT_ARCH_TRIPLET:/snap/gnome-3-32-1804-sdk/current/usr/lib/$SNAPCRAFT_ARCH_TRIPLET:/snap/gnome-3-32-1804-sdk/current/usr/lib:/snap/gnome-3-32-1804-sdk/current/usr/lib/vala-current:$LD_LIBRARY_PATH
+      - PKG_CONFIG_PATH: /snap/gnome-3-32-1804-sdk/current/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/pkgconfig:/snap/gnome-3-32-1804-sdk/current/usr/lib/pkgconfig:/snap/gnome-3-32-1804-sdk/current/usr/share/pkgconfig:$PKG_CONFIG_PATH
+      - GETTEXTDATADIRS: /snap/gnome-3-32-1804-sdk/current/usr/share/gettext-current:$GETTEXTDATADIRS
+      - GDK_PIXBUF_MODULE_FILE: /snap/gnome-3-32-1804-sdk/current/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/gdk-pixbuf-current/loaders.cache
+    build-snaps: [ gnome-3-32-1804-sdk ]
+    override-build: |
+      snapcraftctl build
+      mkdir -pv $SNAPCRAFT_PART_INSTALL/gnome-platform
+  python-pieces:
+    plugin: python
+    source: https://gitlab.com/leinardi/gst.git
+    requirements: [requirements.txt]
+  libsensors5:
+    source: http://cz.archive.ubuntu.com/ubuntu/pool/main/l/lm-sensors/libsensors5_3.5.0-3ubuntu1_amd64.deb
+    plugin: dump
+  gst:
+    after: [desktop-gnome-platform,python-pieces,libsensors5]
+    plugin: meson
+    source: https://gitlab.com/leinardi/gst.git
+    #parse-info: [usr/share/metainfo/com.leinardi.gst.appdata.xml]
+    build-environment: *buildenv
+    meson-parameters:
+      - --prefix=/usr
+    build-packages:
+      - build-essential
+      - appstream-util
+      - gir1.2-gtksource-3.0
+      - libcairo2-dev
+      - libgirepository1.0-dev
+      - libglib2.0-dev
+      - python3-cairo-dev
+      - python3-pip 
+    stage-packages:
+      - python3-gi-cairo
+      - python3-gi
+      - gir1.2-gstreamer-1.0
+      - python3-peewee
+    stage-snaps:
+      - stress-ng
+    override-build: |
+      #pip3 install -r requirements.txt
+      #pip3 install rx
+      sed -i 's|@PKGDATA_DIR@|/snap/gst/current/usr/share/gst|g' bin/gst.in
+      sed -i 's|@localdir@|/snap/gst/current/usr/share/locale|g' bin/gst.in
+      sed -i 's|@PYTHON_DIR@|/snap/gst/current/usr/lib/python3.6/site-packages|g' bin/gst.in
+      # Application checks flathub for updates, we don't need that
+      grep -F -v "self._check_new_version()" gst/presenter/main_presenter.py > gst/presenter/main_presenter.py_tmp && mv gst/presenter/main_presenter.py_tmp gst/presenter/main_presenter.py
+      snapcraftctl build
+      snapcraftctl set-version $(git -C ../src describe --tags)
+
+apps:
+  gst:
+    command: bin/desktop-launch ${SNAP}/usr/bin/gst
+    #extensions: [gnome-3-28]
+    plugs:
+      - hardware-observe
+      - system-observe
+      - log-observe
+      - home
+      - x11
+      - wayland
+      - config-sensors
+    environment:
+      PYTHONPATH: $SNAP/gnome-platform/usr/lib/python3.6/site-packages:$SNAP/usr/lib/python3.6/site-packages:$SNAP/usr/lib/python3/dist-packages:$SNAP/lib/python3.6/site-packages
+      LD_LIBRARY_PATH: $SNAP/gnome-platform/usr/lib/$SNAPCRAFT_ARCH_TRIPLET:$SNAP/gnome-platform/usr/lib:$LD_LIBRARY_PATH
+      GI_TYPELIB_PATH: $SNAP/gnome-platform/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/girepository-1.0:$SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/girepository-1.0
